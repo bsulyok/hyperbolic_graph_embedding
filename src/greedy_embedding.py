@@ -1,56 +1,10 @@
-from ...utils import distance
+from .utils import breadth_first_distance, minimum_depth_spanning_tree
 import numpy as np
 from copy import deepcopy
-from ...utils.typing import Adjacency_list, Vertices
-import queue
+from .typing import AdjacencyList, VertexList
 
 
-def minimum_depth_spanning_tree(
-    adjacency_list: Adjacency_list,
-    root: int = None,
-    directed: bool = False
-):
-    '''
-    Find the minimum depth spanning tree rooted at root of the provided graph.
-
-    Parameters
-    ----------
-    adjacency_list : dict of dicts
-        Adjacency list containing edge data.
-    root : int
-        The vertex at which the tree is rooted.
-    directed : bool
-        Whether to return a directed or undirected tree. In the undirected case edges originate from parents and point to children.
-
-    Returns
-    -------
-    tree_adjacency_list : dict of dicts
-        The adjacency list of the minimum depth spanning tree.
-    '''
-    N = len(adjacency_list)
-    tree_adjacency_list = {vertex: {} for vertex in adjacency_list}
-    vertex_queue = queue.Queue()
-    vertex_queue.put(root)
-    visited = dict.fromkeys(adjacency_list, False)
-    visited[root] = True
-    visited_total = 0
-    queue_size = 1
-    while 0 < queue_size and visited_total < N:
-        vertex = vertex_queue.get()
-        queue_size -= 1
-        for neighbour in adjacency_list[vertex]:
-            if not visited[neighbour]:
-                tree_adjacency_list[vertex].update({neighbour: adjacency_list[vertex][neighbour]})
-                if not directed:
-                    tree_adjacency_list[neighbour].update({vertex: adjacency_list[neighbour][vertex]})
-                vertex_queue.put(neighbour)
-                queue_size += 1
-                visited[neighbour] = True
-                visited_total += 1
-    return tree_adjacency_list
-
-
-def extract_moebius_transformation(z1, w1, z2, w2, z3, w3):
+def get_moebius_transformation(z1, w1, z2, w2, z3, w3):
     a = np.linalg.det(np.array([
         [z1*w1, w1, 1],
         [z2*w2, w2, 1],
@@ -83,39 +37,42 @@ def apply_mobius_transformation(z, M):
 
 
 def greedy_embedding(
-    adjacency_list: Adjacency_list,
-    vertices: Vertices = None
+    adjacency_list: AdjacencyList
 ):
-    if vertices is None:
-        vertices = {vertex: {} for vertex in adjacency_list}
-    else:
-        vertices = deepcopy(vertices)
+    '''
+    This is a hyperbolic graph embedding algorithm written following the work outlined by R. Kleinberg in their 2007 publication.
 
-    min_dist = {}
-    for vertex, dist in distance(adjacency_list).items():
-        min_dist[vertex] = min(dist.values())
-    root = min(min_dist, key=lambda vertex: min_dist[vertex])
+    Parameters
+    ----------
+    adjacency_list : dict of dicts
+        Adjacency list containing edge data.
 
-    children = minimum_depth_spanning_tree(
-        adjacency_list,
-        root=root,
-        directed=True
-    )
+    Returns
+    -------
+    vertex_list : dict of dicts
+        Vertex list containing the inferred hyperbolic coordinates.
+    '''
+
+    vertex_list = {vertex: {} for vertex in adjacency_list}
+
+    root, min_max_dist = 0, np.inf
+    for vertex in adjacency_list:
+        dist = breadth_first_distance(adjacency_list, vertex)
+        max_dist = max(dist.values())
+        if max_dist < min_max_dist:
+            root, min_max_dist = vertex, max_dist
+
+    children = minimum_depth_spanning_tree(adjacency_list, root)
     tree_degree = max(len(ch) for ch in children.values()) + 1
 
-    # declare the relevant Mobius transformations
+    # transform the final positions to the native disk
+    coord_transform = lambda r:  2*np.arctanh(r)
+
+    # initialize the relevant Moebius transformations
     last_root = np.exp(-2j*np.pi/tree_degree)
     last_half_root = np.exp(-2j*np.pi/2/tree_degree)
-    sigma = extract_moebius_transformation(
-        1, 1,
-        last_root, -1,
-        last_half_root, -1j
-    )
-    isigma = extract_moebius_transformation(
-        1, 1,
-        -1, last_root,
-        -1j, last_half_root
-    )
+    sigma = get_moebius_transformation(1, 1, last_root, -1, last_half_root, -1j)
+    isigma = get_moebius_transformation(1, 1, -1, last_root, -1j, last_half_root)
     A = np.array([[-1, 0], [0, 1]])
     B = []
     for k in range(tree_degree):
@@ -130,16 +87,16 @@ def greedy_embedding(
     def iterative_coordination_search(vertex, transform):
         coord = apply_mobius_transformation(v, invert_mobius(transform))
         r = abs(coord)
-        r = 2*np.arctanh(r)
+        r = coord_transform(r)
         angle = np.arctan2(coord.imag, coord.real)
-        vertices[vertex].update({'r': r, 'theta': angle})
+        vertex_list[vertex].update({'r': r, 'theta': angle})
         for child_id, child in enumerate(children[vertex], 1):
             child_transform = B[child_id] @ A @ transform
             iterative_coordination_search(child, child_transform)
 
-    vertices[root].update({'r': 0, 'theta': 0})
-    # iteratively find the coordinates of all vertices
+    vertex_list[root].update({'r': 0, 'theta': 0})
     for child_id, child in enumerate(children[root]):
         child_transform = B[child_id] @ root_transform
         iterative_coordination_search(child, child_transform)
-    return vertices
+    
+    return vertex_list

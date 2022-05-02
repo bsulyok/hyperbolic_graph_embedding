@@ -1,34 +1,29 @@
-from numpy.core.numeric import full
-
-from graphx import geometry
+from .typing import AdjacencyList, VertexList
 import numpy as np
 from scipy.special import hyp2f1
 from copy import deepcopy
 from itertools import combinations
 from scipy import integrate
-from ..topology import global_clustering_coefficient
+from .utils import global_clustering_coefficient
 
 
-def mercator(adjacency_list, vertices, **kwargs):
+def mercator_embedding(
+    adjacency_list,
+    **kwargs
+) -> VertexList:
+
+    vertex_list = {vertex: {} for vertex in adjacency_list}
     
-    if vertices is None:
-        vertices = {vertex: {} for vertex in adjacency_list}
-    else:
-        vertices = deepcopy(vertices)
-    
-    np.random.seed(0)
+    N = len(adjacency_list)
+    R = N / 2 / np.pi
 
     beta_min, beta_max = 1, -1
     beta_found = False
+    beta = 2 + np.random.rand()
 
     acceptable_kappa_deviation = 1e-5
     lcc_sample_count = 600
     acceptable_lcc_deviation = 1e-2
-
-    beta = 2 + np.random.rand()
-
-    N = len(vertices)
-    R = N / 2 / np.pi
 
     vertex_degree = np.array([[vert, len(neigh)] for vert, neigh in adjacency_list.items()], dtype=int)
     vertex, degree = vertex_degree[np.argsort(vertex_degree[:,1])][::-1].T
@@ -235,9 +230,9 @@ def mercator(adjacency_list, vertices, **kwargs):
     kappa_min = np.min(kappa)
     r_max = 2*np.log(N / mu / np.pi / kappa_min**2)
 
-    coord_transform = kwargs.get('coord_transform', geometry.identity)
+    coord_transform = lambda x: x
     for vert_i, kappa_i, theta_i in zip(vertex, kappa, theta):
         r_vertex, theta_vertex = coord_transform(r_max-2*np.log(kappa_i/kappa_min), theta_i)
-        vertices[vert_i]= {'r': r_vertex, 'theta': theta_vertex}
+        vertex_list[vert_i]= {'r': r_vertex, 'theta': theta_vertex}
     
-    return vertices
+    return vertex_list
